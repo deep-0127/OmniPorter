@@ -7,6 +7,7 @@ use App\Features\Import\Helpers\ImportDetailsCache;
 use App\Features\Import\Jobs\DispatchCompleteImportNotificationJob;
 use App\Features\Import\Results\ResultExport;
 use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Log;
@@ -66,10 +67,12 @@ class GenericImport implements OnEachRow, WithHeadingRow, WithChunkReading, Shou
                 $attributes[$field] = $modelInstance->{$field};
             }
 
-            foreach ($this->instance->getRelationDetailsList() as $relationModel => $details) {
+            foreach ($this->instance->getRelationDetailsList() as $method => $details) {
+                $relationModel = $details['model'];
                 if ($details['type'] == 'belongsTo') {
                     $relationField = $details['field'];
-                    $relatedValue = $row[$this->instance->getFieldHeadingMap()[$relationField]];
+                    $relatedValue = isset($this->instance->getFieldHeadingMap()[$relationField]) ? $row[$this->instance->getFieldHeadingMap()[$relationField]] : null;
+                    if(!$relatedValue) continue;
                     $relatedId = null;
                     if (isset($this->instance->getRelatedModelsCache()[$relationModel][$relatedValue]))
                         $relatedId = $this->instance->getRelatedModelsCache()[$relationModel][$relatedValue];
@@ -88,7 +91,7 @@ class GenericImport implements OnEachRow, WithHeadingRow, WithChunkReading, Shou
             if ($this->update) {
                 $uniqueKey = $this->model::getUniqueKeyForImportExport();
                 $uniqueValue = $row[$this->instance->getFieldHeadingMap()[$uniqueKey] ?? $uniqueKey] ?? null;
-                $modelInstance = $this->instance->getExistingModelsCache()->where($uniqueKey, $uniqueValue)->first();
+                $modelInstance = $this->instance->getExistingModelsCache()->get($uniqueKey, $uniqueValue)?->first();
                 if (!$modelInstance)
                     throw new ImportException(null, $rowIndex, "Update failed: resource with {$uniqueKey} = '{$uniqueValue}' does not exist");
 
@@ -104,9 +107,11 @@ class GenericImport implements OnEachRow, WithHeadingRow, WithChunkReading, Shou
             if ($validator->fails()) {
                 throw new ImportException($validator, $rowIndex);
             }
+            $modelInstance->applyImportContext(['importer_employee_id' => $this->employee->id, 'source' => 'excel', 'batch_id' => $this->batchId]);
             $modelInstance->save();
 
-            foreach ($this->instance->getBelongsToManyDetailsList() as $relationModel => $details) {
+            foreach ($this->instance->getBelongsToManyDetailsList() as $method => $details) {
+                $relationModel = $details['model'];
                 $relatedIds = [];
                 foreach ($this->instance->getBelongsToManyDetailsList()[$relationModel]['headings'] as $heading) {
                     $relatedValues = array_map('trim', explode(',', $row[$heading]));
@@ -119,17 +124,17 @@ class GenericImport implements OnEachRow, WithHeadingRow, WithChunkReading, Shou
                                 $value
                             )->first()?->id) {
                                 $relatedIds[] = $relatedId;
-                                $this->instance->updateRelatedModelsCache($relationModel, $relatedValue, $relatedId);
+                                $this->instance->updateRelatedModelsCache($relationModel, $value, $relatedId);
                             }
                         }
                     }
                 }
 
-                if (!empty($relatedIds)) $modelInstance->{$details['method']}()->{$this->associationMethod}($relatedIds);
+                if (!empty($relatedIds)) $modelInstance->{$method}()->{$this->associationMethod}($relatedIds);
             }
             $this->recordResult($rowIndex, $rawRow, 'success', 'Imported successfully');
             DB::commit();
-        } catch (ImportException $e) {
+        } catch (UniqueConstraintViolationException|ImportException $e) {
             DB::rollBack();
             $this->recordResult($rowIndex, $rawRow, 'error', $e->getMessage());
         } catch (\Exception $e) {
