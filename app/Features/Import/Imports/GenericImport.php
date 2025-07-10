@@ -88,15 +88,37 @@ class GenericImport implements OnEachRow, WithHeadingRow, WithChunkReading, Shou
                 }
             }
 
-            if ($this->update) {
-                $uniqueKey = $this->model::getUniqueKeyForImportExport();
-                $uniqueValue = $row[$this->instance->getFieldHeadingMap()[$uniqueKey] ?? $uniqueKey] ?? null;
-                $modelInstance = $this->instance->getExistingModelsCache()->get($uniqueKey, $uniqueValue)?->first();
-                if (!$modelInstance)
-                    throw new ImportException(null, $rowIndex, "Update failed: resource with {$uniqueKey} = '{$uniqueValue}' does not exist");
+            $modelInstance->applyImportContext(['importer_employee_id' => $this->employee->id, 'source' => 'excel', 'batch_id' => $this->batchId]);
+            $attributes = array_merge($attributes, array_diff_key($modelInstance->getAttributes(), $attributes));
 
-                $modelInstance->fill($attributes);
+            if ($this->update) {
+                $uniqueKeys = $this->model::getUniqueKeysForUpdate();
+                if(is_array($uniqueKeys)) {
+                    $conditions = [];
+                    foreach ($uniqueKeys as $uniqueKey) {
+                        $uniqueValue = $attributes[$uniqueKey] ?? null;
+                        $conditions[$uniqueKey] = "$uniqueValue";
+                    }
+
+                    $cache = $this->instance->getExistingModelsCache();
+                    foreach ($conditions as $field => $value) {
+                        $cache = $cache->where($field, $value);
+                    }
+                    $modelInstance = $cache?->first();
+
+                    $uniqueKeys = implode(",", array_keys($conditions));
+                    $uniqueValue = implode(",", $conditions);
+                } else {
+                    $uniqueValue = $attributes[$uniqueKeys] ?? null;
+                    $modelInstance = $this->instance->getExistingModelsCache()->where($uniqueKeys, $uniqueValue)?->first();
+                }
+
+                if (!$modelInstance)
+                    throw new ImportException(null, $rowIndex, "Update failed: resource with {$uniqueKeys} = '{$uniqueValue}' does not exist");
+
+                $modelInstance = $modelInstance->fill($attributes);
                 $id = $modelInstance?->id ?? null;
+                Log::info($modelInstance->id);
                 $rules = $this->instance->getValidationFileInstance()->rules($id);
             } else {
                 $rules = $this->instance->getValidationFileInstance()->rules();
@@ -107,7 +129,7 @@ class GenericImport implements OnEachRow, WithHeadingRow, WithChunkReading, Shou
             if ($validator->fails()) {
                 throw new ImportException($validator, $rowIndex);
             }
-            $modelInstance->applyImportContext(['importer_employee_id' => $this->employee->id, 'source' => 'excel', 'batch_id' => $this->batchId]);
+
             $modelInstance->save();
 
             foreach ($this->instance->getBelongsToManyDetailsList() as $method => $details) {
