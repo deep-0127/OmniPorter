@@ -25,9 +25,9 @@ class ImportDetailsCache
         $model,
         bool $update,
     ): self {
-        if(Redis::exists(self::getCacheKey($batchId))) {
-            $array = json_decode(Redis::get(self::getCacheKey($batchId)), true);
-            return self::fromArray($array);
+        $cached = Redis::get(self::getCacheKey($batchId));
+        if ($cached) {
+            return self::fromArray(json_decode($cached, true));
         }
         $instance = new self($batchId, $model, $update);
         $instance->initialize();
@@ -44,34 +44,39 @@ class ImportDetailsCache
         $this->fillableFields = $this->model->getFillable();
         $this->relationDetailsList = $this->model->getListOfRelationDetails();
 
-        $array = explode('\\', $this->model::class);
-        $count = count($array);
-        $requestType = $this->update ? "Update" : "Create";
-        $modelName = end($array);
-        $fileName = $requestType . $modelName . "Request";
-        $array[$count - 1] = $fileName;
-        $array[$count - 2] = "Validators";
-        $file = trim(implode("\\", $array));
-        if(class_exists($file)) {
+        $validators = $this->model::getImportValidators();
+
+        $file = $this->update
+            ? ($validators['update'] ?? null)
+            : ($validators['create'] ?? null);
+
+        if($file && class_exists($file)) {
             $this->validationFileInstance = new $file;
         } else {
-            Log::warning("Validation file not found: $file");
+            $mode = $this->update ? 'Update' : 'Create';
+            Log::error("Validator class for [$mode] not found in model configuration.");
             throw new \Exception("Something went wrong with the import, please contact admin!", 500);
         }
-        foreach ($this->relationDetailsList as $relationModel => $relationDetails) {
+
+        foreach ($this->relationDetailsList as $method => $relationDetails) {
+            unset($this->relationDetailsList[$method]);
+            $method = strtolower($method);
+            $relationModel = $relationDetails['model'];
             $array = explode('\\', $relationModel);
             $relationDetails['pattern'] = strtolower(end($array));
 
-            $this->relatedModelsCache[$relationModel] = $relationModel::pluck(
-                'id',
-                $relationModel::getUniqueKeyForImportExport()
-            );
-            $this->relationDetailsList[$relationModel] = $relationDetails;
+            if(!isset($this->relatedModelsCache[$relationModel])) {
+                $this->relatedModelsCache[$relationModel] = $relationModel::pluck(
+                    'id',
+                    $relationModel::getUniqueKeyForImportExport()
+                );
+            }
+            $this->relationDetailsList[$method] = $relationDetails;
 
             if($relationDetails['type'] == 'belongsToMany')
-                $this->belongsToManyDetailsList[$relationModel] = $relationDetails;
+                $this->belongsToManyDetailsList[$method] = $relationDetails;
             else
-                $this->belongsToOneDetailsList[$relationModel] = $relationDetails;
+                $this->belongsToOneDetailsList[$method] = $relationDetails;
         }
 
         $this->belongsToOneDetailsListCopy = $this->belongsToOneDetailsList;

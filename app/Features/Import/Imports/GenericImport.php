@@ -3,6 +3,7 @@
 namespace App\Features\Import\Imports;
 
 use App\Features\Import\Domain\Import\Exceptions\ImportException;
+use App\Features\Import\Helpers\ImportAttributeCaster;
 use App\Features\Import\Helpers\ImportDetailsCache;
 use App\Features\Import\Jobs\DispatchCompleteImportNotificationJob;
 use App\Features\Import\Results\ResultExport;
@@ -34,135 +35,179 @@ class GenericImport implements OnEachRow, WithHeadingRow, WithChunkReading, Shou
         private $model,
         private bool $update,
         private string $associationMethod,
-        private $employee = null,
-        private $batchId,
-        private $filePath,
+        private ?int $employeeId,
+        private string $batchId,
+        private string $filePath,
     ) {
         $this->instance = ImportDetailsCache::getInstance($this->batchId, $this->model, $this->update);
     }
 
     public function onRow(Row $row)
     {
+        $rowIndex = $row->getIndex();
+        $rawRow = $row->toArray();
+        $mappedData = [];
+        $warnings = [];
+
+        DB::beginTransaction();
         try {
-            $rowIndex = $row->getIndex();
-            $rawRow = $row->toArray();
-            $row = $rawRow;
-
-            DB::beginTransaction();
-            $attributes = [];
-
             if (empty($this->instance->getFieldHeadingMap())) {
-                    $this->instance = ImportDetailsCache::getInstance($this->batchId, $this->model, $this->update);
-                    if (empty($this->instance->getFieldHeadingMap())) {
-                        $this->instance->initializeFieldHeadingMap(array_keys($row));
+                $this->instance = ImportDetailsCache::getInstance($this->batchId, $this->model, $this->update);
+                if (empty($this->instance->getFieldHeadingMap())) {
+                    $this->instance->initializeFieldHeadingMap(array_keys($rawRow));
                 }
             }
 
             $modelInstance = new $this->model();
 
             foreach ($this->instance->getFieldHeadingMap() as $field => $heading) {
-                $value = $row[$heading];
-                $row[$heading] = in_array(strtolower($value), ['true', 'false']) ? strtolower($value) === 'true' : $value;
-                $modelInstance->{$field} = $row[$heading];
-                $attributes[$field] = $modelInstance->{$field};
+                $value = $rawRow[$heading];
+
+                if ($value === null || $value === '') {
+                    $mappedData[$field] = null;
+                    continue;
+                }
+
+                $mappedData[$field] = ImportAttributeCaster::castAttribute($modelInstance, $field ,$value);
             }
 
             foreach ($this->instance->getRelationDetailsList() as $method => $details) {
-                $relationModel = $details['model'];
-                if ($details['type'] == 'belongsTo') {
-                    $relationField = $details['field'];
-                    $relatedValue = isset($this->instance->getFieldHeadingMap()[$relationField]) ? $row[$this->instance->getFieldHeadingMap()[$relationField]] : null;
-                    if(!$relatedValue) continue;
-                    $relatedId = null;
-                    if (isset($this->instance->getRelatedModelsCache()[$relationModel][$relatedValue]))
-                        $relatedId = $this->instance->getRelatedModelsCache()[$relationModel][$relatedValue];
-                    else {
-                        $relatedId = $relationModel::where(
-                            $relationModel::getUniqueKeyForImportExport(),
-                            $relatedValue
-                        )->value('id');
-                        $this->instance->updateRelatedModelsCache($relationModel, $relatedValue, $relatedId);
-                    }
+                if ($details['type'] !== 'belongsTo') continue;
 
-                    $attributes[$relationField] = $relatedId ?? null;
+                $relationModel = $details['model'];
+                $relationField = $details['field'];
+
+                $heading = $this->instance->getFieldHeadingMap()[$relationField] ?? null;
+                $relatedValue = $heading ? ($rawRow[$heading] ?? null) : null;
+
+                if (!$relatedValue) continue;
+
+                if (isset($this->instance->getRelatedModelsCache()[$relationModel][$relatedValue])) {
+                    $mappedData[$relationField] = $this->instance->getRelatedModelsCache()[$relationModel][$relatedValue];
+                } else {
+                    $relatedId = $relationModel::where(
+                        $relationModel::getUniqueKeyForImportExport(),
+                        $relatedValue
+                    )->value('id');
+
+                    if ($relatedId) {
+                        $this->instance->updateRelatedModelsCache($relationModel, $relatedValue, $relatedId);
+                        $mappedData[$relationField] = $relatedId;
+                    } else {
+                        $mappedData[$relationField] = null;
+                        $warnings[] = "Relation '{$heading}' ({$relatedValue}) not found";
+                    }
                 }
             }
 
-            $modelInstance->applyImportContext(['importer_employee_id' => $this->employee->id, 'source' => 'excel', 'batch_id' => $this->batchId]);
-            $attributes = array_merge($attributes, array_diff_key($modelInstance->getAttributes(), $attributes));
+            $modelInstance->applyImportContext([
+                'importer_employee_id' => $this->employeeId,
+                'source' => 'excel',
+                'batch_id' => $this->batchId,
+                'is_update' => $this->update,
+                'provided_attributes' => $mappedData
+            ]);
+
+            $finalAttributes = array_merge($modelInstance->getAttributes(), $mappedData);
+            $validationFile = $this->instance->getValidationFileInstance();
 
             if ($this->update) {
                 $uniqueKeys = $this->model::getUniqueKeysForUpdate();
-                if(is_array($uniqueKeys)) {
-                    $conditions = [];
-                    foreach ($uniqueKeys as $uniqueKey) {
-                        $uniqueValue = $attributes[$uniqueKey] ?? null;
-                        $conditions[$uniqueKey] = "$uniqueValue";
-                    }
+                $modelInstance = $this->findExistingModel($uniqueKeys, $finalAttributes);
 
-                    $cache = $this->instance->getExistingModelsCache();
-                    foreach ($conditions as $field => $value) {
-                        $cache = $cache->where($field, $value);
-                    }
-                    $modelInstance = $cache?->first();
-
-                    $uniqueKeys = implode(",", array_keys($conditions));
-                    $uniqueValue = implode(",", $conditions);
-                } else {
-                    $uniqueValue = $attributes[$uniqueKeys] ?? null;
-                    $modelInstance = $this->instance->getExistingModelsCache()->where($uniqueKeys, $uniqueValue)?->first();
+                if (!$modelInstance) {
+                    throw new ImportException(null, $rowIndex, "Update failed: Record not found.");
                 }
 
-                if (!$modelInstance)
-                    throw new ImportException(null, $rowIndex, "Update failed: resource with {$uniqueKeys} = '{$uniqueValue}' does not exist");
-
-                $modelInstance = $modelInstance->fill($attributes);
-                $id = $modelInstance?->id ?? null;
-                Log::info($modelInstance->id);
-                $rules = $this->instance->getValidationFileInstance()->rules($id);
+                $validatorRules = $validationFile->rules($modelInstance->id, true);
             } else {
-                $rules = $this->instance->getValidationFileInstance()->rules();
-                $modelInstance = new $this->model($attributes);
+                $validatorRules = $validationFile->rules(true);
             }
 
-            $validator = Validator::make($modelInstance->getAttributes(), $rules);
+            $validator = Validator::make($finalAttributes, $validatorRules);
+
             if ($validator->fails()) {
                 throw new ImportException($validator, $rowIndex);
             }
 
+            $modelInstance->fill($finalAttributes);
             $modelInstance->save();
 
-            foreach ($this->instance->getBelongsToManyDetailsList() as $method => $details) {
-                $relationModel = $details['model'];
-                $relatedIds = [];
-                foreach ($this->instance->getBelongsToManyDetailsList()[$relationModel]['headings'] as $heading) {
-                    $relatedValues = array_map('trim', explode(',', $row[$heading]));
-                    foreach ($relatedValues as $value) {
-                        if (isset($this->instance->getRelatedModelsCache()[$relationModel][$value])) {
-                            $relatedIds[] = $this->instance->getRelatedModelsCache()[$relationModel][$value];
-                        } else {
-                            if ($relatedId = $relationModel::where(
-                                $relationModel::getUniqueKeyForImportExport(),
-                                $value
-                            )->first()?->id) {
-                                $relatedIds[] = $relatedId;
-                                $this->instance->updateRelatedModelsCache($relationModel, $value, $relatedId);
-                            }
-                        }
-                    }
-                }
+            $this->processBelongsToMany($modelInstance, $rawRow);
 
-                if (!empty($relatedIds)) $modelInstance->{$method}()->{$this->associationMethod}($relatedIds);
+            if (!empty($warnings)) {
+                $rowStatus = 'partial_success';
+                $finalMessage = 'Imported with warnings: ' . implode(', ', $warnings);
+            } else {
+                $rowStatus = 'success';
+                $finalMessage = 'Imported successfully';
             }
-            $this->recordResult($rowIndex, $rawRow, 'success', 'Imported successfully');
+
+            $this->recordResult($rowIndex, $rawRow, $rowStatus, $finalMessage);
             DB::commit();
-        } catch (UniqueConstraintViolationException|ImportException $e) {
+            $modelInstance->afterImportSave([
+                'is_update' => $this->update,
+                'row_index' => $rowIndex,
+            ]);
+        } catch (UniqueConstraintViolationException $e) {
+            DB::rollBack();
+            $this->recordResult($rowIndex, $rawRow, 'error', "Duplicate Entry: " . $e->getMessage());
+        } catch (ImportException $e) {
             DB::rollBack();
             $this->recordResult($rowIndex, $rawRow, 'error', $e->getMessage());
         } catch (\Exception $e) {
             DB::rollBack();
-            Log::error("Error while importing {$rowIndex}: {$e->getMessage()} {$e->getTraceAsString()}");
-            $this->recordResult($rowIndex, $rawRow, 'error', "Failed to import");
+            Log::error("Import Error Row {$rowIndex}: " . $e->getMessage());
+            $this->recordResult($rowIndex, $rawRow, 'error', "System Error");
+        }
+    }
+
+    private function findExistingModel($uniqueKeys, $attributes)
+    {
+        $query = $this->instance->getExistingModelsCache();
+
+        if (is_array($uniqueKeys)) {
+            foreach ($uniqueKeys as $key) {
+                $query = $query->where($key, $attributes[$key] ?? null);
+            }
+            return $query->first();
+        }
+
+        return $query->where($uniqueKeys, $attributes[$uniqueKeys] ?? null)->first();
+    }
+
+    private function processBelongsToMany($modelInstance, $row)
+    {
+        foreach ($this->instance->getBelongsToManyDetailsList() as $method => $details) {
+            $relationModel = $details['model'];
+            $relatedIds = [];
+
+            if (!isset($this->instance->getBelongsToManyDetailsList()[$relationModel]['headings'])) continue;
+
+            foreach ($this->instance->getBelongsToManyDetailsList()[$relationModel]['headings'] as $heading) {
+                if(empty($row[$heading])) continue;
+
+                $relatedValues = array_map('trim', explode(',', $row[$heading]));
+
+                foreach ($relatedValues as $value) {
+                    if (isset($this->instance->getRelatedModelsCache()[$relationModel][$value])) {
+                        $relatedIds[] = $this->instance->getRelatedModelsCache()[$relationModel][$value];
+                    } else {
+                        $foundId = $relationModel::where(
+                            $relationModel::getUniqueKeyForImportExport(),
+                            $value
+                        )->value('id');
+
+                        if ($foundId) {
+                            $relatedIds[] = $foundId;
+                            $this->instance->updateRelatedModelsCache($relationModel, $value, $foundId);
+                        }
+                    }
+                }
+            }
+            if (!empty($relatedIds)) {
+                $modelInstance->{$method}()->{$this->associationMethod}($relatedIds);
+            }
         }
     }
 
@@ -177,7 +222,7 @@ class GenericImport implements OnEachRow, WithHeadingRow, WithChunkReading, Shou
 
     public function chunkSize(): int
     {
-        return 250;
+        return 250 ;
     }
 
     public static function getChunkFilePath(string $batchId, int $chunkIndex): string
@@ -213,8 +258,8 @@ class GenericImport implements OnEachRow, WithHeadingRow, WithChunkReading, Shou
         $export = new ResultExport($merged);
         Excel::store($export, $finalExcelPath);
 
-        if ($this->employee?->work_email) {
-            DispatchCompleteImportNotificationJob::dispatch($this->employee->work_email, Storage::path(self::getFinalExcelPath($this->batchId)), $failedRows);
+        if ($this->employeeId) {
+            DispatchCompleteImportNotificationJob::dispatch($this->employeeId, Storage::path(self::getFinalExcelPath($this->batchId)), $failedRows);
         }
     }
 

@@ -17,7 +17,7 @@ class ImportCompleteMail extends Mailable
     /**
      * Create a new message instance.
      */
-    public function __construct(private $filePath, private $failedRows )
+    public function __construct(private $filePath, private $failedRows)
     {
         //
     }
@@ -39,7 +39,7 @@ class ImportCompleteMail extends Mailable
     public function content(): Content
     {
         return new Content(
-            view: 'emails.import_complete', with: [ 'failedRows' => $this->failedRows ]
+            view: 'emails.import_complete', with: ['failedRows' => $this->failedRows]
         );
     }
 
