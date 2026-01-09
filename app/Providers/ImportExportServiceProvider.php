@@ -21,6 +21,27 @@ class ImportExportServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        $cachePath = base_path('bootstrap/cache/import_export_models.php');
+
+        if (app()->environment('local')) {
+            $this->scanAndRegisterDynamically();
+            return;
+        }
+
+        if (file_exists($cachePath)) {
+            $map = require $cachePath;
+
+            foreach ($map['imports'] as $resource => $class) {
+                ImportController::addToClassMap($resource, $class);
+            }
+
+            foreach ($map['exports'] as $resource => $class) {
+                ExportController::addToClassMap($resource, $class);
+            }
+        }
+    }
+
+    private function scanAndRegisterDynamically() {
         $modelPaths = glob(app_path('Features\**\Domain\**\Models\*.php'));
         foreach ($modelPaths as $modelPath) {
             $model = str_replace([app_path(), '/', '.php'], ['App', '\\', ''], $modelPath);
