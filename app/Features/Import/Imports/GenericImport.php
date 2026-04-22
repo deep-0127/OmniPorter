@@ -222,7 +222,7 @@ class GenericImport implements OnEachRow, WithHeadingRow, WithChunkReading, Shou
 
     public function chunkSize(): int
     {
-        return 250 ;
+        return 50;
     }
 
     public static function getChunkFilePath(string $batchId, int $chunkIndex): string
