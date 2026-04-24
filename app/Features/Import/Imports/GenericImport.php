@@ -35,7 +35,7 @@ class GenericImport implements OnEachRow, WithHeadingRow, WithChunkReading, Shou
         private $model,
         private bool $update,
         private string $associationMethod,
-        private ?int $employeeId,
+        private ?string $notifiableEmail,
         private string $batchId,
         private string $filePath,
     ) {
@@ -101,7 +101,7 @@ class GenericImport implements OnEachRow, WithHeadingRow, WithChunkReading, Shou
             }
 
             $modelInstance->applyImportContext([
-                'importer_employee_id' => $this->employeeId,
+                'notifiable_email' => $this->notifiableEmail,
                 'source' => 'excel',
                 'batch_id' => $this->batchId,
                 'is_update' => $this->update,
@@ -258,8 +258,8 @@ class GenericImport implements OnEachRow, WithHeadingRow, WithChunkReading, Shou
         $export = new ResultExport($merged);
         Excel::store($export, $finalExcelPath);
 
-        if ($this->employeeId) {
-            DispatchCompleteImportNotificationJob::dispatch($this->employeeId, Storage::path(self::getFinalExcelPath($this->batchId)), $failedRows);
+        if ($this->notifiableEmail) {
+            DispatchCompleteImportNotificationJob::dispatch($this->notifiableEmail, Storage::path(self::getFinalExcelPath($this->batchId)), $failedRows);
         }
     }
 

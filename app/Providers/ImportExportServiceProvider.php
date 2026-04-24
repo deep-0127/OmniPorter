@@ -38,58 +38,43 @@ class ImportExportServiceProvider extends ServiceProvider
             foreach ($map['exports'] as $resource => $class) {
                 ExportController::addToClassMap($resource, $class);
             }
+        } else {
+            // Fallback: scan and create cache if it doesn't exist
+            $this->scanAndRegisterDynamically();
         }
     }
 
     private function scanAndRegisterDynamically(): void
     {
-        $basePath = app_path('Features');
+        $modelPaths = glob(app_path('Features/**/Domain/**/Models/*.php'));
+        $importMap = [];
+        $exportMap = [];
 
-        $iterator = new \RecursiveIteratorIterator(
-            new \RecursiveDirectoryIterator($basePath)
-        );
+        foreach ($modelPaths as $modelPath) {
+            $model = str_replace([app_path(), '/', '.php'], ['App', '\\', ''], $modelPath);
 
-        foreach ($iterator as $file) {
-            if (
-                !$file->isFile() ||
-                $file->getExtension() !== 'php' ||
-                !str_contains($file->getPathname(), 'Domain' . DIRECTORY_SEPARATOR) ||
-                !str_contains($file->getPathname(), 'Models')
-            ) {
-                continue;
-            }
-
-            $modelPath = $file->getPathname();
-
-            // Convert path to class name
-            $model = str_replace(
-                [
-                    app_path() . DIRECTORY_SEPARATOR,
-                    DIRECTORY_SEPARATOR,
-                    '.php',
-                ],
-                [
-                    'App\\',
-                    '\\',
-                    '',
-                ],
-                $modelPath
-            );
+            $resourceName = (explode('\\', $model));
+            $resourceName = strtolower(end($resourceName));
 
             if (!class_exists($model)) {
                 continue;
             }
 
-            $resourceName = strtolower(class_basename($model));
-
-            if (in_array(\App\Traits\HasImport::class, class_uses($model))) {
+            if (in_array('App\Traits\HasImport', class_uses($model))) {
                 ImportController::addToClassMap($resourceName, $model);
+                $importMap[$resourceName] = $model;
             }
 
-            if (in_array(\App\Traits\HasExport::class, class_uses($model))) {
+            if (in_array('App\Traits\HasExport', class_uses($model))) {
                 ExportController::addToClassMap($resourceName, $model);
+                $exportMap[$resourceName] = $model;
             }
         }
+
+        // Update cache file
+        $cachePath = base_path('bootstrap/cache/import_export_models.php');
+        $content = "<?php return " . var_export(['imports' => $importMap, 'exports' => $exportMap], true) . ";";
+        file_put_contents($cachePath, $content);
     }
 
 

@@ -10,8 +10,8 @@ use Maatwebsite\Excel\Facades\Excel;
 
 trait HasExport
 {
-    public static function export(array $exportableColumns, array $columns, array $filters, $employee, string $exportType = 'xlsx'): void
-    {;
+    public static function export(array $exportableColumns, array $columns, array $filters, ?string $notifiableEmail = null, string $exportType = 'xlsx'): void
+    {
         $batchId = Str::uuid()->toString();
         $filePath = "exports/$batchId.$exportType";
 
@@ -19,7 +19,7 @@ trait HasExport
             new GenericExport(new static, $batchId, $exportableColumns, $columns, $filters),
             $filePath
         )->chain([
-            new DispatchCompleteExportNotificationJob($employee->work_email, Storage::path($filePath))
+            new DispatchCompleteExportNotificationJob($notifiableEmail, Storage::path($filePath))
         ]);
     }
 }

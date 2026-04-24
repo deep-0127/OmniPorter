@@ -9,14 +9,12 @@ use Maatwebsite\Excel\Facades\Excel;
 
 trait HasImport
 {
-    public static function import(string $filePath, bool $update, $employee, string $associationMethod = "sync",): void
+    public static function import(string $filePath, bool $update, ?string $notifiableEmail = null, string $associationMethod = "sync",): void
     {
         $batchId = Str::uuid()->toString();
 
-        $employeeId = $employee?->id;
-
         Excel::queueImport(
-            new GenericImport(new static, $update, $associationMethod, $employeeId, $batchId, $filePath),
+            new GenericImport(new static, $update, $associationMethod, $notifiableEmail, $batchId, $filePath),
             $filePath
         );
     }
@@ -42,7 +40,7 @@ trait HasImport
      * ```
      * ---
      * @param array<string, mixed> $context An associative array of contextual import data.
-     *                                      Example: ```['importer_employee_id' => 1, 'source' => 'excel', 'batch_id' => 'batch_1234']```
+     *                                      Example: ```['notifiable_email' => 'user@example.com', 'source' => 'excel', 'batch_id' => 'batch_1234']```
      * @return void
      */
     public function applyImportContext(array $context): void {}
@@ -67,7 +65,7 @@ trait HasImport
      * ```
      * public static function getUniqueKeysForUpdate(): array|string
      * {
-     *     return ['employee_id', 'month', 'year'];
+     *     return ['user_id', 'month', 'year'];
      * }
      * ```
      *
@@ -75,7 +73,7 @@ trait HasImport
      * ### When to use:
      * - **Single key**: If the table uses a primary key (e.g., `id`) or unique key (e.g., `work_email`) for uniqueness.
      * - **Multiple keys**: If the table enforces a **composite unique constraint**
-     *   (e.g., `employee_id`, `month`, `year` in a payroll table).
+     *   (e.g., `user_id`, `month`, `year` in a payroll table).
      * ---
      * ### Related methods:
      * - `getUniqueKeyForImportExport()` – Defines uniqueness for import/export **relations**.
@@ -84,7 +82,7 @@ trait HasImport
      * ---
      * @return array<string>|string
      *         - A string for single-column uniqueness (e.g., 'id').
-     *         - An array for multi-column uniqueness (e.g., ['employee_id', 'month', 'year']).
+     *         - An array for multi-column uniqueness (e.g., ['user_id', 'month', 'year']).
      */
     public static function getUniqueKeysForUpdate(): array|string {
         return self::getUniqueKeyForImportExport();
@@ -109,7 +107,7 @@ trait HasImport
      * {
      *      if ($this->wasRecentlyCreated) {
      *          // Send a welcome email using data from the import context
-     *          Mail::to($this->email)->queue(new WelcomeEmail($context['importer_employee_id']));
+     *          Mail::to($this->email)->queue(new WelcomeEmail($context['notifiable_email']));
      *      }
      *
      *      Log::info("Imported record {$this->id} in batch {$context['batch_id']}");
@@ -117,7 +115,7 @@ trait HasImport
      * ```
      * ---
      * @param array<string, mixed> $context An associative array of contextual import data.
-     * Example: ```['importer_employee_id' => 1, 'source' => 'excel', 'batch_id' => '...']```
+     * Example: ```['notifiable_email' => 'user@example.com', 'source' => 'excel', 'batch_id' => '...']```
      * @return void
      */
      public function afterImportSave(array $context): void {}

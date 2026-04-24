@@ -2,7 +2,6 @@
 
 namespace App\Features\Import\Jobs;
 
-use App\Features\EmployeeManagement\Domain\Employee\Models\Employee;
 use App\Features\Import\Mail\ImportCompleteMail;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -17,7 +16,7 @@ class DispatchCompleteImportNotificationJob implements ShouldQueue
      * Create a new job instance.
      */
     public function __construct(
-        private int $employeeId,
+        private ?string $email,
         private string $filePath,
         private int $failedRows
     ) {}
@@ -27,9 +26,8 @@ class DispatchCompleteImportNotificationJob implements ShouldQueue
      */
     public function handle(): void
     {
-        $employee = Employee::find($this->employeeId);
-        if ($employee && $employee->work_email) {
-            Mail::to($employee->work_email)->send(new ImportCompleteMail($this->filePath, $this->failedRows));
+        if ($this->email) {
+            Mail::to($this->email)->send(new ImportCompleteMail($this->filePath, $this->failedRows));
         }
     }
 }
