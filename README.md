@@ -49,13 +49,14 @@ Let’s embark on this journey to bestow your models with these remarkable capab
 
 ## 📥 II. Making Your Model Importable with OmniPorter
 
-### 🔧 A. Implementing the `Importable` Contract
+### 🔧 A. Implementing the `Importable` and `Exportable` Contracts
 
 ```php
-use App\Concerns\Importable;
+use OmniPorter\Contracts\Importable;
+use OmniPorter\Contracts\Exportable;
 use Illuminate\Database\Eloquent\Model;
 
-class YourModel extends Model implements Importable
+class YourModel extends Model implements Importable, Exportable
 {
     public static function getUniqueKeyForImportExport(): string
     {
@@ -67,6 +68,7 @@ class YourModel extends Model implements Importable
         return [
             Department::class => ['type' => 'belongsTo', 'method' => 'department', 'field' => 'department_id'],
             Employee::class => ['type' => 'belongsTo', 'method' => 'manager', 'field' => 'reports_to'],
+            Profile::class => ['type' => 'hasOne', 'method' => 'profile', 'field' => 'profile_id'],
             Role::class => ['type' => 'belongsToMany', 'method' => 'roles'],
         ];
     }
@@ -78,9 +80,9 @@ class YourModel extends Model implements Importable
 ### ✨ B. Leveraging the `HasImport` Trait
 
 ```php
-use App\Traits\HasImport;
+use OmniPorter\Traits\HasImport;
 
-class YourModel extends Model implements Importable
+class YourModel extends Model implements Importable, Exportable
 {
     use HasImport;
 }
@@ -117,7 +119,45 @@ public function rules(?int $id = null): array
 ### 🔄 D. Mapping Excel Headings to Model Fields
 
 - Excel headers should match your model’s `fillable` fields.
-- For related models, use their `getUniqueKeyForImportExport()` return value as the header name.
+- For `belongsTo` relations, use the related model's `getUniqueKeyForImportExport()` return value as the header name.
+- For `belongsToMany` relations, provide a comma-separated list of unique keys.
+
+> [!NOTE]
+> `hasOne` relations are currently supported for **Export** only. For **Import**, use `belongsTo` on the model that holds the foreign key.
+
+---
+
+### 🔮 E. Auto-Creating Missing Related Records
+
+OmniPorter can automatically create missing related records during import. For example, if an employee's CSV contains a designation that doesn't exist yet, OmniPorter can create it on the fly.
+
+To enable this, implement the `getAutoCreateAttributesOnImport()` static method on the related model:
+
+```php
+class Designation extends Model
+{
+    /**
+     * Return the attributes for auto-creating this model during import.
+     * Return null to disable auto-creation.
+     */
+    public static function getAutoCreateAttributesOnImport(string $value): ?array
+    {
+        return [
+            'title' => $value,       // The matched column
+            'type'  => 'employee',   // Default values for required fields
+        ];
+    }
+}
+```
+
+**How it works:**
+1. During import, if a `belongsTo` relation value (e.g., "Data Scientist") is not found in the database, OmniPorter checks if the related model has `getAutoCreateAttributesOnImport()`.
+2. If the method exists and returns a non-null array, a new record is created with those attributes.
+3. The import cache is updated so subsequent rows referencing the same value don't trigger duplicate creation.
+4. All auto-creations are logged for audit purposes.
+
+> [!TIP]
+> If `getAutoCreateAttributesOnImport()` returns `null`, the relation is skipped (set to `null`) and a warning is logged. This allows you to opt-in per model.
 
 ---
 
@@ -126,9 +166,9 @@ public function rules(?int $id = null): array
 ### 🧲 A. Use the `HasExport` Trait
 
 ```php
-use App\Traits\HasExport;
+use OmniPorter\Traits\HasExport;
 
-class YourModel extends Model implements Importable
+class YourModel extends Model implements Importable, Exportable
 {
     use HasExport;
 }
@@ -215,39 +255,62 @@ $user->hasAnyPermission(['employee:create', 'employee:store']);
 
 ---
 
-## ⚙️ VI. Behind the Curtains of OmniPorter
+---
 
-### 🔍 1. Dynamic Model Discovery
+## ⚙️ VI. Configuration
 
-`ImportExportServiceProvider` dynamically discovers models using traits—**no manual registration** needed.
+Publish the config file:
+
+```bash
+php artisan vendor:publish --tag="omniporter-config"
+```
+
+| Key | Environment Variable | Default | Description |
+|-----|----------------------|---------|-------------|
+| `cache.store` | `OMNIPORTER_CACHE_STORE` | `redis` | The cache store for job state. |
+| `cache.prefix` | `OMNIPORTER_CACHE_PREFIX` | `omniporter` | Prefix for cache keys. |
+| `cache.ttl` | `OMNIPORTER_CACHE_TTL` | `3600` | How long to keep state (seconds). |
+| `import.disk` | `OMNIPORTER_IMPORT_DISK` | `local` | Disk for uploads/results. |
+| `export.disk` | `OMNIPORTER_EXPORT_DISK` | `local` | Disk for final export files. |
 
 ---
 
-### 🌀 2. Asynchronous Processing
+## 🧹 VII. Maintenance
 
-- `queueImport()`
-- `queueExport()`
+### Clearing Cache
+If you encounter issues with stuck jobs or state, you can clear the OmniPorter cache:
 
-Each runs in chunks (default: 250 rows).
-
----
-
-### 🔄 3. Resilient State via Redis
-
-- Tracks job state
-- Recovers from crashes
-- Resumes processing seamlessly
+```bash
+php artisan omniporter:clear-cache
+```
 
 ---
 
-### 📬 4. Notification System
+## 🏗️ VIII. Behind the Curtains of OmniPorter: How it Works
 
-- `ImportCompleteMail`
-- `ExportCompleteMail`
+OmniPorter is designed for massive scale and reliability. Here is how the magic happens:
 
-Clear, detailed email reports sent after each job.
+### 📥 The Import Flow
+1. **Upload**: The user sends a file to the `ImportController`.
+2. **Storage**: The file is stored on the configured disk.
+3. **Queueing**: A `GenericImport` job is dispatched to the queue.
+4. **Processing**:
+   - The file is read in chunks using `Maatwebsite\Excel`.
+   - Each row is validated using your model's `getImportValidators()`.
+   - Relationships are resolved via `getListOfRelationDetails()`.
+   - Records are created or updated using the unique key from `getUniqueKeysForUpdate()`.
+5. **State Tracking**: Progress and failures are tracked in real-time using the `ImportDetailsCache` (stored in Redis).
+6. **Completion**: A notification is sent to the user with a summary of successes and failures.
 
----
+### 📤 The Export Flow
+1. **Request**: The user requests an export via `ExportController`, optionally providing filters and columns.
+2. **Filtering**: OmniPorter applies dynamic filters based on the request parameters.
+3. **Queueing**: A `GenericExport` job is dispatched.
+4. **Generation**:
+   - Data is queried in chunks to avoid memory issues.
+   - Relationships are eager-loaded for performance.
+   - The final spreadsheet is generated and saved to the export disk.
+5. **Notification**: The user receives an email with a secure download link.
 
 ## 🎯 Conclusion: OmniPorter, Your Data Swiss Army Knife
 
