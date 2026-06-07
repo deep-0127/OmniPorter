@@ -82,10 +82,11 @@ class ImportControllerTest extends TestCase
             'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
         );
 
-        $response = $this->postJson('/api/v1/imports/stub/upsert', ['file' => $file]);
+        // the 'mode' parameter is restricted by regex 'create|update'
+        // so 'upsert' will cause a 404 because the route doesn't match
+        $response = $this->postJson('/imports/stub/upsert', ['file' => $file]);
 
-        $response->assertStatus(422);
-        $response->assertJsonPath('success', false);
+        $response->assertStatus(404);
     }
 
     // ── unknown resource ──────────────────────────────────────────────────────
@@ -99,7 +100,7 @@ class ImportControllerTest extends TestCase
             'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
         );
 
-        $response = $this->postJson('/api/v1/imports/unknown_resource/create', ['file' => $file]);
+        $response = $this->postJson('/imports/unknown_resource/create', ['file' => $file]);
 
         $response->assertStatus(404);
         $response->assertJsonPath('success', false);
@@ -110,7 +111,7 @@ class ImportControllerTest extends TestCase
     #[Test]
     public function missing_file_returns_422(): void
     {
-        $response = $this->postJson('/api/v1/imports/stub/create', []);
+        $response = $this->postJson('/imports/stub/create', []);
 
         $response->assertStatus(422);
     }
@@ -126,7 +127,7 @@ class ImportControllerTest extends TestCase
             'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
         );
 
-        $response = $this->postJson('/api/v1/imports/stubs/create', ['file' => $file]);
+        $response = $this->postJson('/imports/stubs/create', ['file' => $file]);
 
         $response->assertStatus(200);
         $response->assertJsonPath('success', true);
@@ -150,7 +151,7 @@ class ImportControllerTest extends TestCase
             'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
         );
 
-        $response = $this->postJson('/api/v1/imports/stubs/update', ['file' => $file]);
+        $response = $this->postJson('/imports/stubs/update', ['file' => $file]);
 
         $response->assertStatus(200);
         $response->assertJsonPath('success', true);

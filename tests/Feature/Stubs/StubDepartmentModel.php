@@ -24,4 +24,9 @@ class StubDepartmentModel extends Model implements Importable
     {
         return [];
     }
+
+    public function beforeImportValidation(array &$data): void
+    {
+        // ...
+    }
 }

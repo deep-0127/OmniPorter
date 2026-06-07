@@ -32,4 +32,9 @@ class StubRoleModel extends Model implements Importable
 
     public function applyImportContext(array $context): void {}
     public function afterImportSave(array $context): void {}
+
+    public function beforeImportValidation(array &$data): void
+    {
+        // ...
+    }
 }

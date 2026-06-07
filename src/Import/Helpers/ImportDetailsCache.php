@@ -350,7 +350,11 @@ class ImportDetailsCache
     public function getExistingModelsCache(): mixed { return $this->model::query(); }
     public function getFieldHeadingMap(): array { return $this->fieldHeadingMap; }
     public function updateRelatedModelsCache($relationModel, $relatedValue, $relatedId) {
+        if (!is_scalar($relatedValue)) {
+            return;
+        }
+        $relationModelStr = is_object($relationModel) ? get_class($relationModel) : $relationModel;
         $trimmedValue = is_string($relatedValue) ? trim($relatedValue) : $relatedValue;
-        $this->relatedModelsCache[$relationModel][$trimmedValue] = $relatedId;
+        $this->relatedModelsCache[$relationModelStr][$trimmedValue] = $relatedId;
     }
 }
