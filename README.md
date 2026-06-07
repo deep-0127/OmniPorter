@@ -1,7 +1,12 @@
 # 🚀 Unlocking Data Mastery with **OmniPorter**
 ### *The Ultimate Laravel Import/Export Framework*
 
-Tired of manual data entry nightmares and clunky import/export processes?  
+[![Latest Version on Packagist](https://img.shields.io/packagist/v/deep-shah/omniporter.svg?style=flat-square)](https://packagist.org/packages/deep-shah/omniporter)
+[![GitHub Tests Action Status](https://img.shields.io/github/actions/workflow/status/deep-0127/OmniPorter/tests.yml?branch=main&label=tests&style=flat-square)](https://github.com/deep-0127/OmniPorter/actions?query=workflow%3ATests+branch%3Amain)
+[![Total Downloads](https://img.shields.io/packagist/dt/deep-shah/omniporter.svg?style=flat-square)](https://packagist.org/packages/deep-shah/omniporter)
+[![License](https://img.shields.io/packagist/l/deep-shah/omniporter.svg?style=flat-square)](https://packagist.org/packages/deep-shah/omniporter)
+
+Tired of manual data entry nightmares and clunky import/export processes?
 Dream of a world where your application effortlessly ingests and disgorges vast datasets with bulletproof validation and intelligent relationship management?
 
 **Your quest ends here—with OmniPorter.**
