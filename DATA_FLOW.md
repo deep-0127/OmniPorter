@@ -578,6 +578,52 @@ Frontend    Controller    Model    Queue    GenericImport    Cache    DB    Noti
    |<--Response-|           |         |           |          |      |          |
 ```
 
+## Progress Tracking
+
+OmniPorter provides real-time progress tracking for imports via the `ProgressUpdated` event and `ProgressController`.
+
+### ProgressUpdated Event
+**Location**: `src/Shared/Events/ProgressUpdated.php`
+
+Broadcasts progress updates via Laravel's broadcasting system:
+- `batchId`: Unique batch identifier
+- `type`: Import or export
+- `progress`: Percentage complete (0-100)
+- `totalRows`: Total number of rows
+- `processedRows`: Number of rows processed
+
+**Channel**: `omniporter-progress.{batchId}`
+
+### Progress Polling
+If WebSocket broadcasting is not available, frontend can poll for progress:
+
+```http
+GET /api/v1/imports/progress/{batchId}
+```
+
+**Response**:
+```json
+{
+  "success": true,
+  "data": {
+    "batch_id": "550e8400-e29b-41d4-a716-446655440000",
+    "total_rows": 1000,
+    "processed_rows": 750,
+    "progress": 75.0,
+    "status": "in_progress"
+  }
+}
+```
+
+**Status Values**:
+- `pending`: Import has not started
+- `in_progress`: Import is currently processing
+- `completed`: Import has finished
+
+**Code Reference**: `src/Import/Http/Controllers/ProgressController.php:12`
+
+---
+
 ## Key Decision Points
 
 ### 1. Create vs Update Mode

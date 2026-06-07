@@ -1,0 +1,16 @@
+<?php
+
+namespace {{namespace}};
+
+use OmniPorter\Contracts\ExportableInterface;
+
+class {{className}} implements ExportableInterface
+{
+    public function exportableColumns(): array
+    {
+        return [
+            // List of columns that can be exported
+            'id', 'created_at'
+        ];
+    }
+}

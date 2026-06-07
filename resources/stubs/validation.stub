@@ -1,0 +1,16 @@
+<?php
+
+namespace {{namespace}};
+
+use OmniPorter\Contracts\ImportValidationInterface;
+
+class {{className}} implements ImportValidationInterface
+{
+    public function rules($id = null, bool $isUpdate = false): array
+    {
+        return [
+            // Define your rules here
+            // 'email' => 'required|email|unique:users,email' . ($id ? ",$id" : ""),
+        ];
+    }
+}

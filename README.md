@@ -243,6 +243,46 @@ GET /exports/{resource}
 
 ---
 
+### 📊 Progress Tracking Endpoint
+
+```http
+GET /imports/progress/{batchId}
+```
+
+Track the progress of an import in real-time:
+
+**Response**:
+```json
+{
+  "success": true,
+  "data": {
+    "batch_id": "550e8400-e29b-41d4-a716-446655440000",
+    "total_rows": 1000,
+    "processed_rows": 750,
+    "progress": 75.0,
+    "status": "in_progress"
+  }
+}
+```
+
+**Status Values**:
+- `pending`: Import has not started
+- `in_progress`: Import is currently processing
+- `completed`: Import has finished
+
+**WebSocket Events**:
+For real-time updates, listen to the `omniporter-progress.{batchId}` channel:
+
+```javascript
+Echo.channel(`omniporter-progress.${batchId}`)
+    .listen('ProgressUpdated', (e) => {
+        console.log(`Progress: ${e.progress}%`);
+        console.log(`Processed: ${e.processedRows}/${e.totalRows}`);
+    });
+```
+
+---
+
 ## 🛡️ V. OmniPorter Authorization & Permissions
 
 - `employee:import`, `employee:create`, `employee:store`

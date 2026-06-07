@@ -95,6 +95,46 @@ GET /api/v1/exports/employees?columns=name,email,department_id&type=xlsx&departm
 
 ---
 
+### Progress Endpoints
+
+#### GET /api/v1/imports/progress/{batchId}
+
+Retrieves the progress status of an import batch.
+
+**Parameters**:
+- `batchId` (path): Unique batch identifier returned when import was queued
+
+**Response**:
+```json
+{
+  "success": true,
+  "data": {
+    "batch_id": "550e8400-e29b-41d4-a716-446655440000",
+    "total_rows": 1000,
+    "processed_rows": 750,
+    "progress": 75.0,
+    "status": "in_progress"
+  }
+}
+```
+
+**Status Values**:
+- `pending`: Import has not started
+- `in_progress`: Import is currently processing
+- `completed`: Import has finished
+
+**Error Response**:
+```json
+{
+  "success": false,
+  "message": "Import batch [550e8400-e29b-41d4-a716-446655440000] not found."
+}
+```
+
+**Code Reference**: `src/Import/Http/Controllers/ProgressController.php:12`
+
+---
+
 ## HasImport Trait
 
 ### Methods
@@ -676,6 +716,52 @@ php artisan omniporter:scaffold Employee
 ```
 
 **Code Reference**: `src/Console/Commands/ScaffoldCommand.php`
+
+---
+
+## Contracts & Interfaces
+
+### ImportValidationInterface
+
+Interface that must be implemented by any validation class used by OmniPorter.
+
+**Location**: `src/Contracts/ImportValidationInterface.php`
+
+**Method**:
+```php
+public function rules($id = null, bool $isUpdate = false): array
+```
+
+**Parameters**:
+- `$id`: The ID of the resource (for update operations)
+- `$isUpdate`: Whether this is an update operation
+
+**Returns**: Array of validation rules
+
+**Example**:
+```php
+use OmniPorter\Contracts\ImportValidationInterface;
+use Illuminate\Foundation\Http\FormRequest;
+
+class EmployeeImportRequest extends FormRequest implements ImportValidationInterface
+{
+    public function rules($id = null, bool $isUpdate = false): array
+    {
+        return [
+            'name' => ['required', 'string', 'max:255'],
+            'email' => [
+                'required',
+                'email',
+                $isUpdate
+                    ? Rule::unique('employees', 'email')->ignore($id)
+                    : Rule::unique('employees', 'email'),
+            ],
+        ];
+    }
+}
+```
+
+**Purpose**: Ensures validation classes provide the required `rules()` method with support for both create and update modes.
 
 ---
 

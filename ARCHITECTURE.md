@@ -107,6 +107,14 @@ Handles HTTP requests for exports:
 - `exportResource()` - Validates columns and queues export job
 - Maintains static class map of exportable models
 
+#### ProgressController
+**Location**: `src/Import/Http/Controllers/ProgressController.php`
+
+Handles progress tracking for imports:
+- `show()` - Returns progress status for a given batch ID
+- Calculates percentage complete
+- Determines status (pending, in_progress, completed)
+
 ### 3. Import Processing
 
 #### GenericImport

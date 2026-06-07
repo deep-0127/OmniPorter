@@ -29,15 +29,12 @@ yarn-error.log
 # Dev scaffolding (not part of package)
 /app
 /bootstrap
-/config
 /database
 /docs
 /imports
-/resources
 /routes
 /scratch
 /storage
-/tests
 cleanup.php
 debug_*.php
 generate_*.py
@@ -47,7 +44,4 @@ artisan
 composer.lock
 package-lock.json
 .git-backup
-.claude
-.omc
-.paul
-
+PROJECT.md
